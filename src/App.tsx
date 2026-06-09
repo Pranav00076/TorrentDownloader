@@ -5,12 +5,6 @@ import { useState, useEffect, useRef } from 'react';
  * SPDX-License-Identifier: Apache-2.0
  */
 
-declare global {
-  interface Window {
-    WebTorrent: any;
-  }
-}
-
 type PeerUI = {
   ip: string;
   client: string;
@@ -69,7 +63,6 @@ function formatTime(ms: number) {
 }
 
 export default function App() {
-  const [client, setClient] = useState<any>(null);
   const [torrents, setTorrents] = useState<TorrentUI[]>([]);
   const [selectedTorrentId, setSelectedTorrentId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'General' | 'Peers' | 'Files'>('General');
@@ -83,95 +76,63 @@ export default function App() {
   const [totalDown, setTotalDown] = useState(0);
   const [totalUp, setTotalUp] = useState(0);
 
-  // Initialize WebTorrent Client
+  // Initialize and Sync with Backend API
   useEffect(() => {
-    let wtClient: any = null;
-    try {
-      if (window.WebTorrent) {
-        wtClient = new window.WebTorrent();
-        wtClient.on('error', (err: any) => {
-          console.error("WebTorrent error:", err);
-        });
-        setClient(wtClient);
-        setBackendStatus('WebTorrent Engine Active');
+    let intervalId: any;
 
-        // Optional: add a default torrent if we want a test case (e.g. Sintel)
-        // wtClient.add('magnet:?xt=urn:btih:08ada5a7a6183aae1e09d831df6748d566095a10&dn=Sintel&tr=wss%3A%2F%2Ftracker.btorrent.xyz', (torrent: any) => {});
-      } else {
+    const fetchHealth = async () => {
+      try {
+        const res = await fetch('/api/health');
+        if (res.ok) setBackendStatus('WebTorrent Engine Active');
+        else setBackendStatus('WebTorrent Engine Failed');
+      } catch (e) {
         setBackendStatus('WebTorrent Engine Failed');
       }
-    } catch (e) {
-      console.error(e);
-      setBackendStatus('WebTorrent Engine Failed');
-    }
+    };
 
-    return () => {
-      if (wtClient) {
-        wtClient.destroy();
+    const fetchTorrents = async () => {
+      try {
+        const res = await fetch('/api/torrents');
+        if (res.ok) {
+          const data = await res.json();
+          setTotalDown(data.downloadSpeed);
+          setTotalUp(data.uploadSpeed);
+          
+          const uiTorrents = data.torrents.map((t: any) => ({
+            id: t.id,
+            name: t.name,
+            size: t.sizeBytes ? formatBytes(t.sizeBytes) : '-',
+            sizeBytes: t.sizeBytes,
+            progress: t.progress,
+            status: t.paused ? 'Paused' : t.done ? 'Seeding' : t.name !== 'Retrieving Metadata...' ? 'Downloading' : 'Metadata',
+            downSpeed: formatBytes(t.downSpeed) + '/s',
+            upSpeed: formatBytes(t.upSpeed) + '/s',
+            eta: formatTime(t.timeRemaining),
+            peers: t.numPeers,
+            seeds: t.numPeers, 
+            downloaded: formatBytes(t.downloaded),
+            uploaded: formatBytes(t.uploaded),
+            files: t.files,
+            peerList: t.wires,
+            _torrent: t // we keep it for reference but won't call methods on it directly
+          }));
+          
+          setTorrents(uiTorrents);
+        }
+      } catch (e) {
+        console.error("Failed to fetch torrents:", e);
       }
     };
-  }, []);
 
-  // Update loop for syncing React state with WebTorrent state
-  useEffect(() => {
-    if (!client) return;
-
-    const intervalId = setInterval(() => {
-      setTotalDown(client.downloadSpeed);
-      setTotalUp(client.uploadSpeed);
-
-      const uiTorrents = client.torrents.map((t: any) => {
-        return {
-          id: t.infoHash,
-          name: t.name || 'Retrieving Metadata...',
-          size: t.length ? formatBytes(t.length) : '-',
-          sizeBytes: t.length || 0,
-          progress: t.progress * 100,
-          status: t.paused ? 'Paused' : t.done ? 'Seeding' : t.name ? 'Downloading' : 'Metadata',
-          downSpeed: formatBytes(t.downloadSpeed) + '/s',
-          upSpeed: formatBytes(t.uploadSpeed) + '/s',
-          eta: formatTime(t.timeRemaining),
-          peers: t.numPeers,
-          seeds: t.numPeers, // WebTorrent doesn't cleanly split seeds/peers sometimes
-          downloaded: formatBytes(t.downloaded),
-          uploaded: formatBytes(t.uploaded),
-          files: t.files ? t.files.map((f: any) => ({ 
-            name: f.name, 
-            length: f.length,
-            downloaded: f.downloaded,
-            progress: f.progress * 100
-          })) : [],
-          peerList: t.wires ? t.wires.map((w: any) => {
-            const numPieces = t.pieces ? t.pieces.length : 0;
-            let peerProgress = 0;
-            if (w.peerPieces && numPieces > 0) {
-              let piecesHave = 0;
-              for (let i = 0; i < numPieces; i++) {
-                if (w.peerPieces.get(i)) piecesHave++;
-              }
-              peerProgress = (piecesHave / numPieces) * 100;
-            }
-            return {
-              ip: w.remoteAddress || 'Unknown',
-              client: (w.peerExtendedHandshake && w.peerExtendedHandshake.v) 
-                       ? w.peerExtendedHandshake.v.toString() 
-                       : 'Unknown',
-              downSpeed: formatBytes(w.downloadSpeed ? w.downloadSpeed() : 0) + '/s',
-              upSpeed: formatBytes(w.uploadSpeed ? w.uploadSpeed() : 0) + '/s',
-              downloaded: formatBytes(w.downloaded || 0),
-              uploaded: formatBytes(w.uploaded || 0),
-              progress: peerProgress
-            };
-          }) : [],
-          _torrent: t,
-        };
-      });
-
-      setTorrents(uiTorrents);
+    fetchHealth();
+    fetchTorrents();
+    
+    intervalId = setInterval(() => {
+      fetchTorrents();
     }, 1000);
 
     return () => clearInterval(intervalId);
-  }, [client]);
+  }, []);
 
   useEffect(() => {
     const handleGlobalClick = () => setContextMenu(prev => ({ ...prev, torrentId: null }));
@@ -179,30 +140,16 @@ export default function App() {
     return () => window.removeEventListener('click', handleGlobalClick);
   }, []);
 
-  const handleAddMagnet = () => {
-    if (!magnetLink.trim() || !client) return;
+  const handleAddMagnet = async () => {
+    if (!magnetLink.trim()) return;
     
     let finalMagnet = magnetLink.trim();
-    // In browser, webtorrent needs wss trackers. Let's append some reliable ones
-    const trackers = [
-      'wss://tracker.btorrent.xyz',
-      'wss://tracker.openwebtorrent.com',
-      'wss://tracker.webtorrent.dev'
-    ];
     
-    // Add trackers to the magnet link if it's a magnet string
-    if (finalMagnet.startsWith('magnet:')) {
-      trackers.forEach(tr => {
-        if (!finalMagnet.includes(encodeURIComponent(tr)) && !finalMagnet.includes(tr)) {
-          finalMagnet += `&tr=${encodeURIComponent(tr)}`;
-        }
-      });
-    }
-
-    // Add torrent via WebTorrent
     try {
-      client.add(finalMagnet, (torrent: any) => {
-        console.log('Torrent added:', torrent.infoHash);
+      await fetch('/api/torrents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ magnetLink: finalMagnet })
       });
     } catch (e) {
       console.error("Failed to add torrent:", e);
@@ -214,21 +161,21 @@ export default function App() {
 
   const selectedTorrent = torrents.find(t => t.id === selectedTorrentId) || torrents[0];
 
-  const handleStart = () => {
-    if (selectedTorrent && selectedTorrent._torrent) {
-      selectedTorrent._torrent.resume();
+  const handleStart = async () => {
+    if (selectedTorrent) {
+      await fetch(`/api/torrents/${selectedTorrent.id}/resume`, { method: 'POST' });
     }
   };
 
-  const handlePause = () => {
-    if (selectedTorrent && selectedTorrent._torrent) {
-      selectedTorrent._torrent.pause();
+  const handlePause = async () => {
+    if (selectedTorrent) {
+      await fetch(`/api/torrents/${selectedTorrent.id}/pause`, { method: 'POST' });
     }
   };
 
-  const handleRemove = () => {
-    if (selectedTorrent && selectedTorrent._torrent) {
-      selectedTorrent._torrent.destroy();
+  const handleRemove = async () => {
+    if (selectedTorrent) {
+      await fetch(`/api/torrents/${selectedTorrent.id}`, { method: 'DELETE' });
       setSelectedTorrentId(null);
     }
   };
@@ -239,20 +186,23 @@ export default function App() {
     setContextMenu({ x: e.clientX, y: e.clientY, torrentId: id });
   };
 
-  const handleContextAction = (action: 'pause' | 'resume' | 'remove' | 'copyHash') => {
+  const handleContextAction = async (action: 'pause' | 'resume' | 'remove' | 'copyHash') => {
     if (!contextMenu.torrentId) return;
     const t = torrents.find(t => t.id === contextMenu.torrentId);
-    if (!t || !t._torrent) return;
+    if (!t) return;
 
-    if (action === 'pause') t._torrent.pause();
-    if (action === 'resume') t._torrent.resume();
-    if (action === 'remove') {
-      t._torrent.destroy();
+    if (action === 'pause') {
+      await fetch(`/api/torrents/${t.id}/pause`, { method: 'POST' });
+    } else if (action === 'resume') {
+      await fetch(`/api/torrents/${t.id}/resume`, { method: 'POST' });
+    } else if (action === 'remove') {
+      await fetch(`/api/torrents/${t.id}`, { method: 'DELETE' });
       if (selectedTorrentId === contextMenu.torrentId) setSelectedTorrentId(null);
-    }
-    if (action === 'copyHash') {
+    } else if (action === 'copyHash') {
       navigator.clipboard.writeText(t.id);
     }
+    
+    setContextMenu(prev => ({ ...prev, torrentId: null }));
   };
 
   return (
@@ -401,7 +351,7 @@ export default function App() {
                   <div>
                     <div className="grid grid-cols-[100px_1fr] gap-1 mb-1">
                       <span className="text-[#8B949E] text-right pr-2">Save As:</span>
-                      <span className="text-white truncate">Memory / IndexedDB (WebTorrent)</span>
+                      <span className="text-white truncate">Disk Persistence (Server)</span>
                     </div>
                     <div className="grid grid-cols-[100px_1fr] gap-1 mb-1">
                       <span className="text-[#8B949E] text-right pr-2">Total Size:</span>
@@ -427,7 +377,7 @@ export default function App() {
                     </div>
                     <div className="grid grid-cols-[100px_1fr] gap-1 mb-1">
                       <span className="text-[#8B949E] text-right pr-2">Shares:</span>
-                      <span className="text-white">Ratio {(selectedTorrent._torrent.uploaded / Math.max(selectedTorrent._torrent.downloaded, 1)).toFixed(3)}</span>
+                      <span className="text-white">Ratio {(t => t.uploaded / Math.max(t.downloaded, 1))(selectedTorrent._torrent || {uploaded: 0, downloaded: 1}).toFixed(3)}</span>
                     </div>
                     <div className="grid grid-cols-[100px_1fr] gap-1">
                       <span className="text-[#8B949E] text-right pr-2">Connected:</span>
