@@ -5,9 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
+    "web:dev": "npm run dev",
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
     "start": "node dist/server.cjs",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "electron:dev": "npm run dev & ts-node electron/main.ts",
+    "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -19,6 +22,7 @@
     "motion": "^12.23.24",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
+    "ts-node": "^10.9.2",
     "vite": "^6.2.3",
     "webtorrent": "^3.0.16"
   },
@@ -27,6 +31,8 @@
     "@types/node": "^22.14.0",
     "@types/webtorrent": "^0.110.1",
     "autoprefixer": "^10.4.21",
+    "electron": "^42.3.3",
+    "electron-builder": "^26.15.2",
     "esbuild": "^0.25.12",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.22.4",
