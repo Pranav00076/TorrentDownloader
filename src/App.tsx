@@ -163,18 +163,21 @@ export default function App() {
 
   const handleStart = async () => {
     if (selectedTorrent) {
+      setTorrents(ts => ts.map(t => t.id === selectedTorrent.id ? { ...t, status: 'Downloading' } : t));
       await fetch(`/api/torrents/${selectedTorrent.id}/resume`, { method: 'POST' });
     }
   };
 
   const handlePause = async () => {
     if (selectedTorrent) {
+      setTorrents(ts => ts.map(t => t.id === selectedTorrent.id ? { ...t, status: 'Paused' } : t));
       await fetch(`/api/torrents/${selectedTorrent.id}/pause`, { method: 'POST' });
     }
   };
 
   const handleRemove = async () => {
     if (selectedTorrent) {
+      setTorrents(ts => ts.map(t => t.id === selectedTorrent.id ? { ...t, status: 'Paused', progress: 0 } : t).filter(t => t.id !== selectedTorrent.id));
       await fetch(`/api/torrents/${selectedTorrent.id}`, { method: 'DELETE' });
       setSelectedTorrentId(null);
     }
@@ -192,10 +195,13 @@ export default function App() {
     if (!t) return;
 
     if (action === 'pause') {
+      setTorrents(ts => ts.map(tr => tr.id === t.id ? { ...tr, status: 'Paused' } : tr));
       await fetch(`/api/torrents/${t.id}/pause`, { method: 'POST' });
     } else if (action === 'resume') {
+      setTorrents(ts => ts.map(tr => tr.id === t.id ? { ...tr, status: 'Downloading' } : tr));
       await fetch(`/api/torrents/${t.id}/resume`, { method: 'POST' });
     } else if (action === 'remove') {
+      setTorrents(ts => ts.filter(tr => tr.id !== t.id));
       await fetch(`/api/torrents/${t.id}`, { method: 'DELETE' });
       if (selectedTorrentId === contextMenu.torrentId) setSelectedTorrentId(null);
     } else if (action === 'copyHash') {

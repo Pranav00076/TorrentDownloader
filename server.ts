@@ -17,25 +17,38 @@ const client = new WebTorrent();
 
 // Helper to format torrent data for the frontend
 const getTorrentData = (t: WebTorrent.Torrent) => {
+  let progress = 0;
+  let downloaded = 0;
+  let sizeBytes = 0;
+  let timeRemaining = 0;
+  try { progress = t.progress * 100 || 0; } catch (e) {}
+  try { downloaded = t.downloaded || 0; } catch (e) {}
+  try { sizeBytes = t.length || 0; } catch (e) {}
+  try { timeRemaining = t.timeRemaining || 0; } catch (e) {}
+
   return {
     id: t.infoHash,
     name: t.name || "Retrieving Metadata...",
-    sizeBytes: t.length || 0,
-    progress: t.progress * 100,
+    sizeBytes,
+    progress,
     paused: t.paused,
     done: t.done,
-    downSpeed: t.downloadSpeed,
-    upSpeed: t.uploadSpeed,
-    timeRemaining: t.timeRemaining,
-    numPeers: t.numPeers,
-    downloaded: t.downloaded,
-    uploaded: t.uploaded,
-    files: t.files ? t.files.map((f: WebTorrent.TorrentFile) => ({
-      name: f.name,
-      length: f.length,
-      downloaded: f.downloaded,
-      progress: f.progress * 100
-    })) : [],
+    downSpeed: t.downloadSpeed || 0,
+    upSpeed: t.uploadSpeed || 0,
+    timeRemaining,
+    numPeers: t.numPeers || 0,
+    downloaded,
+    uploaded: t.uploaded || 0,
+    files: t.files ? t.files.map((f: WebTorrent.TorrentFile) => {
+      let fProg = 0, fDown = 0;
+      try { fProg = f.progress * 100; fDown = f.downloaded; } catch (e) {}
+      return {
+        name: f.name,
+        length: f.length,
+        downloaded: fDown,
+        progress: fProg
+      };
+    }) : [],
     wires: t.wires ? t.wires.map((w: any) => {
       const numPieces = t.pieces ? t.pieces.length : 0;
       let peerProgress = 0;
@@ -62,7 +75,7 @@ const getTorrentData = (t: WebTorrent.Torrent) => {
 };
 
 const saveState = () => {
-  const torrents = client.torrents.map(t => ({ magnetURI: t.magnetURI }));
+  const torrents = client.torrents.map(t => ({ magnetURI: t.magnetURI, paused: t.paused }));
   fs.writeFileSync(STATE_FILE, JSON.stringify(torrents));
 };
 
@@ -71,9 +84,12 @@ const loadState = () => {
     try {
       const data = JSON.parse(fs.readFileSync(STATE_FILE, "utf-8"));
       if (Array.isArray(data)) {
-        data.forEach((t: { magnetURI: string }) => {
+        data.forEach((t: { magnetURI: string, paused?: boolean }) => {
           if (t.magnetURI) {
-            client.add(t.magnetURI, { path: DOWNLOAD_DIR });
+            const torrent = client.add(t.magnetURI, { path: DOWNLOAD_DIR });
+            if (t.paused) {
+              if (typeof torrent.pause === 'function') torrent.pause();
+            }
           }
         });
       }
@@ -87,9 +103,17 @@ client.on("torrent", () => {
   saveState();
 });
 
+// Prevent internal WebTorrent errors from crashing the Node.js process
+process.on('uncaughtException', (err) => {
+  console.error("Uncaught Exception from WebTorrent:", err.message);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error("Unhandled Rejection:", reason);
+});
+
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = 8087;
 
   app.use(express.json());
 
@@ -135,24 +159,33 @@ async function startServer() {
   app.post("/api/torrents/:id/pause", (req, res) => {
     const torrent = client.get(req.params.id);
     if (!torrent) return res.status(404).json({ error: "Torrent not found" });
-    torrent.pause();
+    if (typeof torrent.pause === 'function') {
+      torrent.pause();
+      saveState();
+    }
     res.json(getTorrentData(torrent as WebTorrent.Torrent));
   });
 
   app.post("/api/torrents/:id/resume", (req, res) => {
     const torrent = client.get(req.params.id);
     if (!torrent) return res.status(404).json({ error: "Torrent not found" });
-    torrent.resume();
+    if (typeof torrent.resume === 'function') {
+      torrent.resume();
+      saveState();
+    }
     res.json(getTorrentData(torrent as WebTorrent.Torrent));
   });
 
   app.delete("/api/torrents/:id", (req, res) => {
-    const torrent = client.get(req.params.id);
-    if (!torrent) return res.status(404).json({ error: "Torrent not found" });
-    torrent.destroy({}, () => {
-      saveState();
-    });
-    res.json({ success: true });
+    try {
+      client.remove(req.params.id, () => {
+        saveState();
+      });
+      res.json({ success: true });
+    } catch (e) {
+      // Ignore if not found
+      res.json({ success: false });
+    }
   });
 
   // Vite middleware for development
@@ -177,3 +210,7 @@ async function startServer() {
 
 export { startServer };
 
+import { fileURLToPath } from 'url';
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  startServer();
+}

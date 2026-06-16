@@ -19,7 +19,7 @@ function createWindow() {
   // Load the dev server URL when in development, otherwise load the built index.html.
   const isDev = process.env.NODE_ENV !== 'production';
   if (isDev) {
-    win.loadURL('http://localhost:3000');
+    win.loadURL('http://localhost:8087');
     win.webContents.openDevTools({ mode: 'detach' });
   } else {
     win.loadFile(path.join(__dirname, '../../dist/index.html'));
@@ -27,8 +27,6 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  // Start the backend server (Express + WebTorrent). It returns a promise; we don't need to await.
-  startServer();
   createWindow();
 
   app.on('activate', () => {

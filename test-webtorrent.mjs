@@ -1,0 +1,7 @@
+import WebTorrent from 'webtorrent';
+const client = new WebTorrent();
+client.add('magnet:?xt=urn:btih:dd8255ecdc7ca55fb0bbf81323d87062db1f6d1c', (torrent) => {
+  console.log('pause is function:', typeof torrent.pause === 'function');
+  console.log('destroy is function:', typeof torrent.destroy === 'function');
+  client.destroy();
+});
