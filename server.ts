@@ -104,8 +104,8 @@ client.on("torrent", () => {
 });
 
 // Prevent internal WebTorrent errors from crashing the Node.js process
-process.on('uncaughtException', (err) => {
-  console.error("Uncaught Exception from WebTorrent:", err.message);
+process.on("uncaughtException", (err) => {
+  console.error("Uncaught Exception from WebTorrent:", err.stack);
 });
 process.on('unhandledRejection', (reason) => {
   console.error("Unhandled Rejection:", reason);
@@ -157,22 +157,29 @@ async function startServer() {
   });
 
   app.post("/api/torrents/:id/pause", (req, res) => {
-    const torrent = client.get(req.params.id);
+    const torrent = client.get(req.params.id) as any;
     if (!torrent) return res.status(404).json({ error: "Torrent not found" });
+    
     if (typeof torrent.pause === 'function') {
       torrent.pause();
-      saveState();
+    } else {
+      torrent.paused = true;
     }
+    saveState();
     res.json(getTorrentData(torrent as WebTorrent.Torrent));
   });
 
   app.post("/api/torrents/:id/resume", (req, res) => {
-    const torrent = client.get(req.params.id);
+    const torrent = client.get(req.params.id) as any;
     if (!torrent) return res.status(404).json({ error: "Torrent not found" });
+    
     if (typeof torrent.resume === 'function') {
       torrent.resume();
-      saveState();
+    } else {
+      torrent.paused = false;
+      if (torrent.discovery) torrent.discovery.start();
     }
+    saveState();
     res.json(getTorrentData(torrent as WebTorrent.Torrent));
   });
 
