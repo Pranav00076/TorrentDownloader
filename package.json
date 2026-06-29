@@ -3,14 +3,30 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "main": "dist/main.js",
   "scripts": {
     "dev": "tsx server.ts",
     "web:dev": "npm run dev",
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
+    "build:electron": "vite build && esbuild electron/main.ts --bundle --platform=node --format=esm --packages=external --sourcemap --outfile=dist/main.js",
+    "pack": "npm run build:electron && electron-builder --mac",
     "start": "node dist/server.cjs",
     "lint": "tsc --noEmit",
     "electron:dev": "npm run dev & ts-node electron/main.ts",
     "postinstall": "electron-builder install-app-deps"
+  },
+  "build": {
+    "appId": "com.example.torrentdownloader",
+    "productName": "TorrentDownloader",
+    "directories": {
+      "output": "release"
+    },
+    "mac": {
+      "target": ["dmg", "dir"]
+    },
+    "files": [
+      "dist/**/*"
+    ]
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

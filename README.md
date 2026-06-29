@@ -6,10 +6,11 @@ This application provides an elegant, dark-themed UI with real-time peer diagnos
 
 ## 🚀 Key Features
 
+* **Standalone macOS App:** Fully packaged and tested as a native `.dmg` application, providing a seamless, installable desktop experience.
 * **Real-Time Peer Diagnostics:** Live dashboard showing download/upload speeds, active connection wires, peer IP addresses, and connected client versions.
-* **Automatic State Recovery:** Session persistence utilizing JSON serialization (`torrents.json`) ensures that if the app is restarted, downloads resume precisely where they left off without losing any downloaded pieces.
+* **Intelligent State Recovery:** The app reads the exact file status and remembers everything. Even if you completely quit the application midway through a download, it saves your state and resumes flawlessly right where you left off.
+* **Flawless Pause/Resume:** Fully resolved complex pausing mechanics. You can now instantly pause and resume massive downloads at any time, gracefully dropping active sockets without piece corruption.
 * **Custom Engine Stabilization:** Built on top of a highly stable legacy WebTorrent engine (`v2.8.5`) to maximize bandwidth and prevent event-loop crashing.
-* **Graceful Pause/Resume:** Custom backend logic gracefully halts peer discovery and drops active sockets without corrupting the file chunk array.
 * **Granular Progress Tracking:** Visual progress bars track the entire torrent as well as the individual files within multi-file torrents.
 * **Optimistic UI Updates:** The React frontend updates instantaneously on user actions (like Pause/Delete) while the Express backend asynchronously manages the TCP/UDP swarm connections in the background.
 

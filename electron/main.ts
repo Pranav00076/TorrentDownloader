@@ -11,22 +11,23 @@ function createWindow() {
     height: 800,
     webPreferences: {
       nodeIntegration: false,
-      contextIsolation: true,
-      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true
     },
   });
 
-  // Load the dev server URL when in development, otherwise load the built index.html.
+  // Always load from the local express server which serves the static files in production.
+  win.loadURL('http://localhost:8087');
+
   const isDev = process.env.NODE_ENV !== 'production';
   if (isDev) {
-    win.loadURL('http://localhost:8087');
     win.webContents.openDevTools({ mode: 'detach' });
-  } else {
-    win.loadFile(path.join(__dirname, '../../dist/index.html'));
   }
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  // Start the background Express server first
+  await startServer();
+  
   createWindow();
 
   app.on('activate', () => {

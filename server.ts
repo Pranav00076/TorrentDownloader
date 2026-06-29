@@ -1,11 +1,12 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
-import { createServer as createViteServer } from "vite";
+import os from "os";
+import { fileURLToPath } from 'url';
 import WebTorrent from "webtorrent";
 
-// The downloaded files will be stored in a 'downloads' folder in the root directory
-export const DOWNLOAD_DIR = path.join(process.cwd(), "downloads");
+// The downloaded files will be stored in a 'downloads' folder in the user's Downloads directory
+export const DOWNLOAD_DIR = path.join(os.homedir(), "Downloads", "TorrentDownloader");
 if (!fs.existsSync(DOWNLOAD_DIR)) {
   fs.mkdirSync(DOWNLOAD_DIR, { recursive: true });
 }
@@ -14,6 +15,9 @@ if (!fs.existsSync(DOWNLOAD_DIR)) {
 export const STATE_FILE = path.join(DOWNLOAD_DIR, "torrents.json");
 
 const client = new WebTorrent();
+
+// In-memory state tracking all torrents (active and paused)
+const torrentRecords: Record<string, any> = {};
 
 // Helper to format torrent data for the frontend
 const getTorrentData = (t: WebTorrent.Torrent) => {
@@ -31,7 +35,7 @@ const getTorrentData = (t: WebTorrent.Torrent) => {
     name: t.name || "Retrieving Metadata...",
     sizeBytes,
     progress,
-    paused: t.paused,
+    paused: false,
     done: t.done,
     downSpeed: t.downloadSpeed || 0,
     upSpeed: t.uploadSpeed || 0,
@@ -74,9 +78,21 @@ const getTorrentData = (t: WebTorrent.Torrent) => {
   };
 };
 
+const syncRecords = () => {
+  client.torrents.forEach(t => {
+    if (!t.infoHash) return;
+    const data = getTorrentData(t);
+    torrentRecords[t.infoHash] = {
+      ...torrentRecords[t.infoHash],
+      ...data,
+      magnetURI: t.magnetURI || torrentRecords[t.infoHash]?.magnetURI
+    };
+  });
+};
+
 const saveState = () => {
-  const torrents = client.torrents.map(t => ({ magnetURI: t.magnetURI, paused: t.paused }));
-  fs.writeFileSync(STATE_FILE, JSON.stringify(torrents));
+  syncRecords();
+  fs.writeFileSync(STATE_FILE, JSON.stringify(Object.values(torrentRecords)));
 };
 
 const loadState = () => {
@@ -84,11 +100,13 @@ const loadState = () => {
     try {
       const data = JSON.parse(fs.readFileSync(STATE_FILE, "utf-8"));
       if (Array.isArray(data)) {
-        data.forEach((t: { magnetURI: string, paused?: boolean }) => {
-          if (t.magnetURI) {
-            const torrent = client.add(t.magnetURI, { path: DOWNLOAD_DIR });
-            if (t.paused) {
-              if (typeof torrent.pause === 'function') torrent.pause();
+        data.forEach(record => {
+          if (record.id && record.magnetURI) {
+            torrentRecords[record.id] = record;
+            if (!record.paused) {
+              client.add(record.magnetURI, { path: DOWNLOAD_DIR }, (t) => {
+                syncRecords();
+              });
             }
           }
         });
@@ -126,10 +144,11 @@ async function startServer() {
   });
 
   app.get("/api/torrents", (req, res) => {
+    syncRecords();
     const data = {
       downloadSpeed: client.downloadSpeed,
       uploadSpeed: client.uploadSpeed,
-      torrents: client.torrents.map(getTorrentData)
+      torrents: Object.values(torrentRecords)
     };
     res.json(data);
   });
@@ -141,13 +160,11 @@ async function startServer() {
     }
 
     try {
-      // Check if already added
-      const existing = client.torrents.find(t => t.magnetURI === magnetLink);
-      if (existing) {
-        return res.json(getTorrentData(existing));
-      }
-
       client.add(magnetLink, { path: DOWNLOAD_DIR }, (torrent) => {
+        torrentRecords[torrent.infoHash] = {
+          ...getTorrentData(torrent),
+          magnetURI: magnetLink
+        };
         saveState();
       });
       res.json({ success: true, message: "Adding torrent..." });
@@ -157,37 +174,64 @@ async function startServer() {
   });
 
   app.post("/api/torrents/:id/pause", (req, res) => {
-    const torrent = client.get(req.params.id) as any;
-    if (!torrent) return res.status(404).json({ error: "Torrent not found" });
-    
-    if (typeof torrent.pause === 'function') {
-      torrent.pause();
+    syncRecords();
+    const id = req.params.id;
+    const record = torrentRecords[id];
+    if (!record) return res.status(404).json({ error: "Torrent not found" });
+
+    record.paused = true;
+    record.downSpeed = 0;
+    record.upSpeed = 0;
+    record.timeRemaining = 0;
+    record.numPeers = 0;
+
+    const t = client.get(id);
+    if (t) {
+      client.remove(id, () => {
+        saveState();
+      });
     } else {
-      torrent.paused = true;
+      saveState();
     }
-    saveState();
-    res.json(getTorrentData(torrent as WebTorrent.Torrent));
+    
+    res.json(record);
   });
 
   app.post("/api/torrents/:id/resume", (req, res) => {
-    const torrent = client.get(req.params.id) as any;
-    if (!torrent) return res.status(404).json({ error: "Torrent not found" });
+    const id = req.params.id;
+    const record = torrentRecords[id];
+    if (!record) return res.status(404).json({ error: "Torrent not found" });
+
+    record.paused = false;
     
-    if (typeof torrent.resume === 'function') {
-      torrent.resume();
+    const t = client.get(id);
+    if (!t && record.magnetURI) {
+      client.add(record.magnetURI, { path: DOWNLOAD_DIR }, () => {
+        saveState();
+      });
     } else {
-      torrent.paused = false;
-      if (torrent.discovery) torrent.discovery.start();
+      saveState();
     }
-    saveState();
-    res.json(getTorrentData(torrent as WebTorrent.Torrent));
+    
+    res.json(record);
   });
 
   app.delete("/api/torrents/:id", (req, res) => {
+    const id = req.params.id;
+    
+    if (torrentRecords[id]) {
+      delete torrentRecords[id];
+    }
+
     try {
-      client.remove(req.params.id, () => {
+      const t = client.get(id);
+      if (t) {
+        client.remove(id, () => {
+          saveState();
+        });
+      } else {
         saveState();
-      });
+      }
       res.json({ success: true });
     } catch (e) {
       // Ignore if not found
@@ -197,13 +241,15 @@ async function startServer() {
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), "dist");
+    const __dirname = path.dirname(fileURLToPath(import.meta.url));
+    const distPath = __dirname;
     app.use(express.static(distPath));
     app.get("*", (req, res) => {
       res.sendFile(path.join(distPath, "index.html"));
@@ -217,7 +263,6 @@ async function startServer() {
 
 export { startServer };
 
-import { fileURLToPath } from 'url';
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   startServer();
 }
