@@ -1,5 +1,7 @@
 # WebTorrent Desktop Downloader
 
+[![Download Latest Release](https://img.shields.io/github/v/release/Pranav00076/TorrentDownloader?label=Download%20macOS%20.dmg&style=for-the-badge&color=blue)](https://github.com/Pranav00076/TorrentDownloader/releases/latest)
+
 A modern, highly-stable Desktop WebTorrent client built from scratch using React 19, TypeScript, Electron, and Node.js. 
 
 This application provides an elegant, dark-themed UI with real-time peer diagnostics, automatic session recovery, and a custom-engineered pause/resume system for reliable Peer-to-Peer file downloads.
