@@ -1,6 +1,11 @@
 import electron from 'electron';
 const { app, BrowserWindow } = electron;
 import path from 'path';
+
+if (app.isPackaged) {
+  process.env.NODE_ENV = 'production';
+}
+
 // Import and start the backend server (Express + WebTorrent) defined in server.ts
 import { startServer } from '../server.ts';
 
